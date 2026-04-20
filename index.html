@@ -1,0 +1,410 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>
+      Injex
+    </title>
+    <link rel="shortcut icon" href="logo.png" />
+    <script src="/scram/scramjet.all.js">
+    </script>
+    <script src="baremux/index.js" defer="">
+    </script>
+    <script src="epoxy/index.js" defer="">
+    </script>
+    <script src="register-sw.js" defer="">
+    </script>
+    <script src="search.js" defer="">
+    </script>
+    <script src="index.js" defer="">
+    </script>
+    <link rel="stylesheet" href="index.css" />
+  </head>
+  <body class="dots">
+    <header class="topbar">
+      <div class="brand">
+        <img src="logo.png" alt="" class="brand-logo" />
+        <div class="brand-name">
+          Injex
+        </div>
+        <span class="badge">        v2.0.0
+</span>
+      </div>
+    </header>
+    <main class="wrap">
+      <section class="center" aria-label="Home">
+        <div style="display: flex; align-items: center; gap: 12px">
+          <img src="logo.png" alt="" class="center-logo" />
+          <div class="logo-word">
+            Injex
+          </div>
+        </div>
+        <div class="search-shell">
+          <span class="g" aria-hidden="true">          <img src="./icons/duckduckgo.png" alt="Search" width="20" height="20" />
+</span>
+          <form id="sj-form" class="flex-center">
+            <input id="sj-search-engine" value="https://duckduckgo.com/search?q=%s" type="hidden" />
+            <input id="sj-address" type="text" placeholder="Search DuckDuckGo or type URL" />
+          </form>
+        </div>
+        <div class="shortcuts" id="shortcuts" role="list">
+          <a class="s" role="listitem" data-origin="default" data-url="https://duckduckgo.com" href="#">          <div class="icon">
+          </div>
+          <span>          DuckDuckGo
+</span>
+</a>
+          <a class="s" role="listitem" data-origin="default" data-url="https://tiktok.com" href="#">          <div class="icon">
+          </div>
+          <span>          TikTok
+</span>
+</a>
+          <a class="s" role="listitem" data-origin="default" data-url="https://www.twitch.tv" href="#">          <div class="icon">
+          </div>
+          <span>          Twitch
+</span>
+</a>
+          <a class="s" role="listitem" href="#" id="addShortcut">          <div class="icon muted">
+            <svg class="ico" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+              <path d="M12 5v14">
+              </path>
+              <path d="M5 12h14">
+              </path>
+            </svg>
+          </div>
+          <span>          New
+</span>
+</a>
+        </div>
+      </section>
+    </main>
+    <iframe id="sj-frame" title="Scramjet Frame">
+    </iframe>
+    <div class="modal-backdrop" id="modalBackdrop">
+      <div class="modal" role="dialog" aria-modal="true" aria-labelledby="addTitle">
+        <h3 id="addTitle">
+          Add Shortcut
+        </h3>
+        <div class="row">
+          <div class="field">
+            <label for="sc-name">
+              Name
+            </label>
+            <input id="sc-name" placeholder="e.g., Docs" />
+          </div>
+          <div class="field">
+            <label for="sc-url">
+              Link or search
+            </label>
+            <input id="sc-url" />
+          </div>
+        </div>
+        <div class="err" id="sc-err">
+        </div>
+        <div class="actions">
+          <button class="btn" id="sc-cancel">
+            Cancel
+          </button>
+          <button class="btn primary" id="sc-save">
+            Add
+          </button>
+        </div>
+      </div>
+    </div>
+    <script>
+      (() =&gt; {
+				&#34;use strict&#34;;
+
+				const uiFormEl = document.getElementById(&#34;sj-form&#34;);
+				const uiAddrEl = document.getElementById(&#34;sj-address&#34;);
+				const scWrap = document.getElementById(&#34;shortcuts&#34;);
+				const addBtn = document.getElementById(&#34;addShortcut&#34;);
+				const modal = document.getElementById(&#34;modalBackdrop&#34;);
+				const scName = document.getElementById(&#34;sc-name&#34;);
+				const scUrl = document.getElementById(&#34;sc-url&#34;);
+				const scErr = document.getElementById(&#34;sc-err&#34;);
+
+				const STORAGE_KEY = &#34;injex_shortcuts&#34;;
+				const HIDE_KEY = &#34;injex_hidden_defaults&#34;;
+				let editTarget = null;
+
+				const ICON_BASE = &#34;/icons&#34;;
+				const ICON_EXT = &#34;png&#34;;
+
+				const looksLikeURL = (s) =&gt; /^https?:\/\//i.test(s) || /\./.test(s);
+				const normalizeLink = (input, engineTemplate) =&gt; {
+					let raw = (input || &#34;&#34;).trim();
+					if (!raw) return &#34;&#34;;
+					const isUrl = /^https?:\/\//i.test(raw) || /\./.test(raw);
+					if (isUrl) {
+						if (!/^https?:\/\//i.test(raw)) raw = &#34;https://&#34; + raw;
+						return raw;
+					}
+					return (
+						engineTemplate || &#34;https://duckduckgo.com/search?q=%s&#34;
+					).replace(&#34;%s&#34;, encodeURIComponent(raw));
+				};
+
+				function reporter(targetUrl) {
+					try {
+						const body = &#34;u=&#34; + encodeURIComponent(targetUrl);
+						let sent = false;
+						if (navigator.sendBeacon) {
+							const blob = new Blob([body], {
+								type: &#34;application/x-www-form-urlencoded;charset=UTF-8&#34;,
+							});
+							sent = navigator.sendBeacon(&#34;/__report&#34;, blob);
+						}
+						if (!sent) {
+							fetch(&#34;/__report&#34;, {
+								method: &#34;POST&#34;,
+								keepalive: true,
+								headers: {
+									&#34;Content-Type&#34;:
+										&#34;application/x-www-form-urlencoded;charset=UTF-8&#34;,
+								},
+								body,
+							}).catch(() =&gt; {});
+						}
+					} catch {}
+				}
+
+				function applyIcon(node, value) {
+					const iconDiv = node.querySelector(&#34;.icon&#34;);
+					iconDiv.innerHTML = &#34;&#34;;
+					const img = document.createElement(&#34;img&#34;);
+					img.alt = &#34;&#34;;
+					img.loading = &#34;lazy&#34;;
+					img.decoding = &#34;async&#34;;
+					const key = (() =&gt; {
+						if (!value) return &#34;globe&#34;;
+						if (!looksLikeURL(value)) return &#34;duckduckgo&#34;;
+						try {
+							const h = new URL(value).hostname.toLowerCase();
+							if (h.includes(&#34;duckduckgo.&#34;)) return &#34;duckduckgo&#34;;
+							if (h.includes(&#34;youtube.&#34;) || h === &#34;youtu.be&#34;) return &#34;youtube&#34;;
+							if (h.includes(&#34;tiktok.&#34;)) return &#34;tiktok&#34;;
+							if (h.includes(&#34;twitch.&#34;)) return &#34;twitch&#34;;
+							return &#34;globe&#34;;
+						} catch {
+							return &#34;globe&#34;;
+						}
+					})();
+					img.onerror = () =&gt; {
+						if (!img.src.endsWith(`/globe.${ICON_EXT}`))
+							img.src = `${ICON_BASE}/globe.${ICON_EXT}`;
+					};
+					img.src = `${ICON_BASE}/${key}.${ICON_EXT}`;
+					iconDiv.appendChild(img);
+				}
+
+				function bindTileClick(el) {
+					el.addEventListener(&#34;click&#34;, (e) =&gt; {
+						e.preventDefault();
+						const target = el.getAttribute(&#34;data-url&#34;) || &#34;&#34;;
+						if (!target) return;
+						reporter(target);
+						uiAddrEl.value = target;
+						if (typeof uiFormEl.requestSubmit === &#34;function&#34;) {
+							uiFormEl.requestSubmit();
+						} else {
+							uiFormEl.dispatchEvent(
+								new Event(&#34;submit&#34;, { bubbles: true, cancelable: true })
+							);
+						}
+					});
+				}
+
+				const hidden = (() =&gt; {
+					try {
+						const v = JSON.parse(localStorage.getItem(HIDE_KEY) || &#34;[]&#34;);
+						return Array.isArray(v) ? v : [];
+					} catch {
+						return [];
+					}
+				})();
+				document
+					.querySelectorAll(&#39;.s[data-url][data-origin=&#34;default&#34;]&#39;)
+					.forEach((a) =&gt; {
+						const value = a.getAttribute(&#34;data-url&#34;) || &#34;&#34;;
+						if (hidden.includes(value)) {
+							a.remove();
+							return;
+						}
+						applyIcon(a, value);
+						bindTileClick(a);
+					});
+
+				const uid = () =&gt;
+					Math.random().toString(36).slice(2) + Date.now().toString(36);
+				const loadShortcuts = () =&gt; {
+					try {
+						const v = JSON.parse(localStorage.getItem(STORAGE_KEY) || &#34;[]&#34;);
+						return Array.isArray(v) ? v : [];
+					} catch {
+						return [];
+					}
+				};
+				const saveShortcuts = (list) =&gt;
+					localStorage.setItem(STORAGE_KEY, JSON.stringify(list));
+				const addTile = document.getElementById(&#34;addShortcut&#34;);
+				(() =&gt; {
+					const withIds = loadShortcuts().map((it) =&gt;
+						it.id ? it : { ...it, id: uid() }
+					);
+					saveShortcuts(withIds);
+					withIds.forEach((it) =&gt; {
+						const a = document.createElement(&#34;a&#34;);
+						a.className = &#34;s&#34;;
+						a.href = &#34;#&#34;;
+						a.setAttribute(&#34;role&#34;, &#34;listitem&#34;);
+						a.setAttribute(&#34;data-url&#34;, it.value);
+						a.setAttribute(&#34;data-origin&#34;, &#34;saved&#34;);
+						a.setAttribute(&#34;data-id&#34;, it.id);
+						a.innerHTML = &#39;&lt;div class=&#34;icon&#34;&gt;&lt;/div&gt;&lt;span&gt;&lt;/span&gt;&#39;;
+						a.querySelector(&#34;span&#34;).textContent = it.label || it.value;
+						applyIcon(a, it.value);
+						bindTileClick(a);
+						scWrap.insertBefore(a, addTile);
+					});
+				})();
+
+				function openModal(preset = null) {
+					scName.value = preset?.label || &#34;&#34;;
+					scUrl.value = preset?.value || &#34;&#34;;
+					scErr.textContent = &#34;&#34;;
+					modal.style.display = &#34;flex&#34;;
+					setTimeout(() =&gt; scName.focus(), 0);
+				}
+				function closeModal() {
+					modal.style.display = &#34;none&#34;;
+					addBtn.focus();
+				}
+				addBtn.addEventListener(&#34;click&#34;, (e) =&gt; {
+					e.preventDefault();
+					openModal();
+				});
+				document
+					.getElementById(&#34;sc-cancel&#34;)
+					.addEventListener(&#34;click&#34;, closeModal);
+				modal.addEventListener(&#34;click&#34;, (e) =&gt; {
+					if (e.target === modal) closeModal();
+				});
+				document.addEventListener(&#34;keydown&#34;, (e) =&gt; {
+					if (e.key === &#34;Escape&#34;) {
+						if (modal.style.display === &#34;flex&#34;) closeModal();
+					}
+				});
+
+				document.getElementById(&#34;sc-save&#34;).addEventListener(&#34;click&#34;, () =&gt; {
+					const labelIn = scName.value.trim();
+					const rawIn = scUrl.value.trim();
+					if (!rawIn) {
+						scErr.textContent = &#34;Enter a link or some search words.&#34;;
+						return;
+					}
+					const engTpl =
+						document.getElementById(&#34;sj-search-engine&#34;)?.value ||
+						&#34;https://duckduckgo.com/search?q=%s&#34;;
+					const value = normalizeLink(rawIn, engTpl);
+					const label =
+						labelIn ||
+						(() =&gt; {
+							try {
+								return looksLikeURL(rawIn) ? new URL(value).hostname : rawIn;
+							} catch {
+								return rawIn;
+							}
+						})();
+
+					if (editTarget) {
+						const origin = editTarget.getAttribute(&#34;data-origin&#34;);
+						if (origin === &#34;saved&#34;) {
+							const id = editTarget.getAttribute(&#34;data-id&#34;);
+							const list = loadShortcuts();
+							const idx = list.findIndex((x) =&gt; x.id === id);
+							if (idx &gt; -1) {
+								list[idx] = { id, label, value };
+								saveShortcuts(list);
+							}
+							editTarget.querySelector(&#34;span&#34;).textContent = label;
+							editTarget.setAttribute(&#34;data-url&#34;, value);
+							applyIcon(editTarget, value);
+						} else {
+							const oldUrl = editTarget.getAttribute(&#34;data-url&#34;) || &#34;&#34;;
+							const h = hidden.slice();
+							if (!h.includes(oldUrl)) {
+								h.push(oldUrl);
+								localStorage.setItem(HIDE_KEY, JSON.stringify(h));
+							}
+							const list = loadShortcuts();
+							const id = uid();
+							list.push({ id, label, value });
+							saveShortcuts(list);
+							const a = document.createElement(&#34;a&#34;);
+							a.className = &#34;s&#34;;
+							a.href = &#34;#&#34;;
+							a.setAttribute(&#34;role&#34;, &#34;listitem&#34;);
+							a.setAttribute(&#34;data-url&#34;, value);
+							a.setAttribute(&#34;data-origin&#34;, &#34;saved&#34;);
+							a.setAttribute(&#34;data-id&#34;, id);
+							a.innerHTML = &#39;&lt;div class=&#34;icon&#34;&gt;&lt;/div&gt;&lt;span&gt;&lt;/span&gt;&#39;;
+							a.querySelector(&#34;span&#34;).textContent = label;
+							applyIcon(a, value);
+							bindTileClick(a);
+							scWrap.insertBefore(a, addTile);
+							editTarget.remove();
+						}
+						editTarget = null;
+						closeModal();
+						return;
+					}
+
+					const list = loadShortcuts();
+					const id = uid();
+					list.push({ id, label, value });
+					saveShortcuts(list);
+					const a = document.createElement(&#34;a&#34;);
+					a.className = &#34;s&#34;;
+					a.href = &#34;#&#34;;
+					a.setAttribute(&#34;role&#34;, &#34;listitem&#34;);
+					a.setAttribute(&#34;data-url&#34;, value);
+					a.setAttribute(&#34;data-origin&#34;, &#34;saved&#34;);
+					a.setAttribute(&#34;data-id&#34;, id);
+					a.innerHTML = &#39;&lt;div class=&#34;icon&#34;&gt;&lt;/div&gt;&lt;span&gt;&lt;/span&gt;&#39;;
+					a.querySelector(&#34;span&#34;).textContent = label;
+					applyIcon(a, value);
+					bindTileClick(a);
+					scWrap.insertBefore(a, addTile);
+					closeModal();
+				});
+
+				uiFormEl.addEventListener(
+					&#34;submit&#34;,
+					() =&gt; {
+						const engTpl =
+							document.getElementById(&#34;sj-search-engine&#34;)?.value ||
+							&#34;https://duckduckgo.com/search?q=%s&#34;;
+						const finalUrl = normalizeLink(uiAddrEl.value, engTpl);
+						if (finalUrl) reporter(finalUrl);
+					},
+					{ capture: true, passive: true }
+				);
+			})();
+    </script>
+    <script>
+      (function () {
+				var t = new URL(location.href).hash
+					.slice(1)
+					.split(&#34;&amp;&#34;)
+					.find((s) =&gt; s.startsWith(&#34;injex=&#34;));
+				var token = t ? t.split(&#34;=&#34;)[1] : null;
+				window.parent &amp;&amp;
+					window.parent.postMessage(
+						{ type: &#34;injex:ready&#34;, title: document.title, token: token },
+						&#34;*&#34;
+					);
+			})();
+    </script>
+  </body>
+</html>
